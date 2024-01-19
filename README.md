@@ -1,2 +1,2 @@
 # ABertSample
-Sentiment Analysis example
+Sentiment analysis example using Bert done on tweets.
