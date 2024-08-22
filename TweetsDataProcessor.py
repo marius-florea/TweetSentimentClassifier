@@ -5,14 +5,13 @@ import transformers as ppb # pytorch transformers
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import cross_val_score
 from sklearn.model_selection import train_test_split
+from transformers import DistilBertTokenizer, DistilBertModel
 
 class TweetsDataProcessor:
 
     def tokenize_tweets(self, tweets_df: pd.DataFrame) -> (torch.Tensor, torch.Tensor):
-        tokenizer_class, pretrained_weights = (ppb.DistilBertTokenizer,
-                                                            'distilbert-base-uncased')
 
-        tokenizer = tokenizer_class.from_pretrained(pretrained_weights)
+        tokenizer = DistilBertTokenizer.from_pretrained("distilbert-base-uncased")
 
         tokenized = tweets_df.apply((lambda x: tokenizer.encode(x, add_special_tokens=True)))
 

@@ -6,3 +6,8 @@ distilbert_sentiments_model/config.json
 distilbert_sentiments_model/pytorch_model.bin
 distilbert_sentiments_model_3000rows/config.json
 distilbert_sentiments_model_3000rows/pytorch_model.bin
+.DS_Store
+venv
+__pycache__/TweetsManager.cpython-39.pyc
+__pycache__/TweetsDataProcessor.cpython-39.pyc
+models/crosslingual-coreference/minilm/model.tar.gz

@@ -18,10 +18,11 @@ from transformers import AutoModelForSequenceClassification
 from torch.optim import AdamW
 from transformers import get_scheduler
 from datasets import load_metric
+import datetime
 import numpy as np
 
-# your bearer token #TODO remove on commit
 MY_BEARER_TOKEN = ""
+
 
 class TweetsManager:
     remote_tweets_repo = RemoteTweetsRepository()
@@ -31,22 +32,22 @@ class TweetsManager:
     def __init__(self):
         print("__init__")
 
-    #Getters
+    # Getters
     def get_tweets_from_git_url(self) -> pd.DataFrame:
         return TweetsManager.remote_tweets_repo.get_tweets_from_git_url()
 
     def load_tweets(self):
         tweets_df = self.get_tweets_from_git_url()
-        tweets_df.rename(columns={0: 'text', 1: 'label'}, inplace=True)
-        subsample_df = tweets_df[:8] #TODO comment this or set a higher value
+        tweets_df.rename(columns={0: "text", 1: "label"}, inplace=True)
+        subsample_df = tweets_df[:50]  # TODO comment this or set a higher value
         tweets_df = subsample_df
         return tweets_df
 
     def load_and_pad_unlabeled_tweets(self):
-        tweets_df = self.load_tweets_from_json('bitcoin-tweets_short.json')
+        tweets_df = self.load_tweets_from_json("bitcoin-tweets_short.json")
         # subsample_df = tweets_df[:1000]
         # tweets_df = subsample_df
-        tweets_df = tweets_df['content']
+        tweets_df = tweets_df["content"]
         padded_input_ids, token_attention_mask = self.tokenize_tweets(tweets_df)
         return padded_input_ids, token_attention_mask
 
@@ -58,31 +59,36 @@ class TweetsManager:
         # authenticatione
 
         search_query = query
-        start_time = "2022-05-24T13:00:00Z"
-        end_time = "2022-05-31T00:00:00Z"
-        tweets = TweetsManager.client.search_recent_tweets(query=query,
-                                                           start_time=start_time,
-                                                           end_time=end_time,
-                                                           tweet_fields=["created_at", "text", "source"],
-                                                           user_fields=["name", "username", "location", "verified",
-                                                                        "description"],
-                                                           max_results=10000,
-                                                           expansions='author_id'
-                                                           )
+        # start_time = "2022-05-21T13:00:00Z"
+        end_time = datetime.datetime.now()
+        date_time_string = "%Y-%m-%dT%H:%M:%SZ"
+        end_time_string = end_time.strftime(date_time_string)
+        seven_days = datetime.timedelta(days=7)
+        start_time = end_time - seven_days
+        start_tm_str = start_time.strftime(date_time_string)
+        tweets = TweetsManager.client.search_recent_tweets(
+            query=query,
+            start_time=start_tm_str,
+            end_time=end_time_string,
+            tweet_fields=["created_at", "text", "source"],
+            user_fields=["name", "username", "location", "verified", "description"],
+            max_results=100,
+            expansions="author_id",
+        )
 
         # create a list of records
         tweet_info_ls = []
         # iterate over each tweet and corresponding user details
-        for tweet, user in zip(tweets.data, tweets.includes['users']):
+        for tweet, user in zip(tweets.data, tweets.includes["users"]):
             tweet_info = {
-                'created_at': tweet.created_at,
-                'text': tweet.text,
-                'source': tweet.source,
-                'name': user.name,
-                'username': user.username,
-                'location': user.location,
-                'verified': user.verified,
-                'description': user.description
+                "created_at": tweet.created_at,
+                "text": tweet.text,
+                "source": tweet.source,
+                "name": user.name,
+                "username": user.username,
+                "location": user.location,
+                "verified": user.verified,
+                "description": user.description,
             }
             tweet_info_ls.append(tweet_info)
         # create dataframe from the extracted records
@@ -92,7 +98,7 @@ class TweetsManager:
 
         return tweets_df
 
-    #Processeing
+    # Processeing
     def tokenize_tweets(self, tweets_df: pd.DataFrame) -> (torch.Tensor, torch.Tensor):
         # pass tweets to tweets data processor
         tweetsProcessor = TweetsDataProcessor()
@@ -100,25 +106,28 @@ class TweetsManager:
         return padded_input_ids, token_attention_mask
 
     def concat_array_to_df(self, tweets_df, arr):
-        df_from_array = pd.DataFrame(arr, columns=['prediction'])
+        df_from_array = pd.DataFrame(arr, columns=["prediction"])
         concatenated_df = pd.concat([tweets_df, df_from_array], axis=1)
-        matching_sentiments = concatenated_df['prediction'] == (concatenated_df['label'])
+        matching_sentiments = concatenated_df["prediction"] == (concatenated_df["label"])
         nr_of_matching_sentiments = matching_sentiments.value_counts()[True]
         total_sentiments = len(matching_sentiments)
         matching_percentage = nr_of_matching_sentiments / total_sentiments
-        print('matching percentage ', matching_percentage)
+        print("matching percentage ", matching_percentage)
         return concatenated_df
+
     # Tokenize and encode the dataset
     def tokenize(self, batch):
-        tokenized_batch = TweetsManager.tokenizer(batch['text'], padding=True, truncation=True, max_length=128)
+        tokenized_batch = TweetsManager.tokenizer(
+            batch["text"], padding=True, truncation=True, max_length=128
+        )
         return tokenized_batch
 
-    #utility
+    # utility
     def get_available_device(self):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         return device
 
-    #model training predictions ...
+    # model training predictions ...
     def load_data_predict_using_sent_pipeline(self):
         sentiment_pipeline = pipeline("sentiment-analysis")
         tweets_df = self.load_tweets()
@@ -126,14 +135,14 @@ class TweetsManager:
         result = sentiment_pipeline(tweets_list)
         print()
         dfr = pd.DataFrame(result)
-        classification_dict = {'POSITIVE': 1, 'NEGATIVE': 0}
+        classification_dict = {"POSITIVE": 1, "NEGATIVE": 0}
         horizontal_concat = pd.concat([tweets_df, dfr], axis=1)
-        horizontal_concat['label'] = horizontal_concat['label'].apply(lambda x: classification_dict[x])
-        matching_sentiments = horizontal_concat[1] == (horizontal_concat['label'])
+        horizontal_concat["label"] = horizontal_concat["label"].apply(lambda x: classification_dict[x])
+        matching_sentiments = horizontal_concat[1] == (horizontal_concat["label"])
         nr_of_matching_sentiments = matching_sentiments.value_counts()[True]
         total_sentiments = len(matching_sentiments)
         matching_percentage = nr_of_matching_sentiments / total_sentiments
-        print('matching percentage ', matching_percentage)
+        print("matching percentage ", matching_percentage)
         model = sentiment_pipeline.model
 
         return
@@ -155,16 +164,15 @@ class TweetsManager:
 
     def load_data_load_distilbert_model_make_prediction(self):
         tweets_df = self.load_tweets()
-        padded_input_ids, token_attention_mask = self.tokenize_tweets(tweets_df['text'])
-        model_class, pretrained_weights = (ppb.DistilBertModel,
-                                           'distilbert-base-uncased')
+        padded_input_ids, token_attention_mask = self.tokenize_tweets(tweets_df["text"])
+        model_class, pretrained_weights = (ppb.DistilBertModel, "distilbert-base-uncased")
         ## Want BERT instead of distilBERT? Uncomment the following line:
         # model_class, tokenizer_class, pretrained_weights =
         # (ppb.BertModel, ppb.BertTokenizer, 'bert-base-uncased')
         model = model_class.from_pretrained(pretrained_weights)
         # Check the output
         # print(dataset_enc["train"].column_names)
-        labels = tweets_df['label']
+        labels = tweets_df["label"]
         self.distilbert_make_prediction(model, padded_input_ids, token_attention_mask, labels)
 
         # #loading some unlabeled data
@@ -201,16 +209,15 @@ class TweetsManager:
         model = AutoModelForSequenceClassification.from_pretrained("distilbert_sentiments_model_3000rows")
         tweets_df = self.load_tweets()
         # padded_input_ids, token_attention_mask = self.tokenize_tweets(tweets_df['text'])
-        labels = tweets_df['label']
+        labels = tweets_df["label"]
         # the shape changed of the output of the model cause of my training
         dataset = Dataset.from_pandas(tweets_df).train_test_split(train_size=0.8, seed=43)
         # Make a list of columns to remove before tokenization
         cols_to_remove = [col for col in dataset["train"].column_names if col != "label"]
 
         dataset = dataset.class_encode_column("label")
-        dataset_enc = dataset.map(self.tokenize, batched=True, remove_columns=cols_to_remove,
-                                  num_proc=4)
-        dataset_enc.set_format('torch', columns=['input_ids', 'attention_mask', 'label'])
+        dataset_enc = dataset.map(self.tokenize, batched=True, remove_columns=cols_to_remove, num_proc=4)
+        dataset_enc.set_format("torch", columns=["input_ids", "attention_mask", "label"])
         data_collator = DataCollatorWithPadding(tokenizer=TweetsManager.tokenizer)
 
         eval_dataloader = DataLoader(dataset_enc["test"], batch_size=8, collate_fn=data_collator)
@@ -218,9 +225,10 @@ class TweetsManager:
         self.evaluate_auto_model_for_seq_classification(model, eval_dataloader)
 
         device = self.get_available_device()
-        tweets_text = tweets_df['text'].to_list()
+        tweets_text = tweets_df["text"].to_list()
         inputs = self.tokenizer(tweets_text, padding=True, truncation=True, return_tensors="pt").to(
-            device)  # Move the tensor to the GPU
+            device
+        )  # Move the tensor to the GPU
         # make prediction
         outputs = model(**inputs)
         print(outputs)
@@ -238,20 +246,21 @@ class TweetsManager:
         print(cols_to_remove)
 
         dataset = dataset.class_encode_column("label")
-        dataset_enc = dataset.map(self.tokenize, batched=True, remove_columns=cols_to_remove,
-                                  num_proc=4)
-        dataset_enc.set_format('torch', columns=['input_ids', 'attention_mask', 'label'])
+        dataset_enc = dataset.map(self.tokenize, batched=True, remove_columns=cols_to_remove, num_proc=4)
+        dataset_enc.set_format("torch", columns=["input_ids", "attention_mask", "label"])
         print(dataset_enc["train"].column_names)
 
         data_collator = DataCollatorWithPadding(tokenizer=TweetsManager.tokenizer)
-        train_dataloader = DataLoader(dataset_enc["train"], shuffle=True, batch_size=8,
-                                      collate_fn=data_collator)
+        train_dataloader = DataLoader(
+            dataset_enc["train"], shuffle=True, batch_size=8, collate_fn=data_collator
+        )
         eval_dataloader = DataLoader(dataset_enc["test"], batch_size=8, collate_fn=data_collator)
         num_labels = dataset["train"].features["label"].num_classes
         print(f"Number of labels:{num_labels}")
         # load model from checkpoint
-        model = AutoModelForSequenceClassification.from_pretrained("distilbert-base-uncased",
-                                                                   num_labels=num_labels)
+        model = AutoModelForSequenceClassification.from_pretrained(
+            "distilbert-base-uncased", num_labels=num_labels
+        )
         # Model parameters
         learning_rate = 5e-5
         num_epochs = 5
@@ -289,7 +298,7 @@ class TweetsManager:
                 progress_bar.update(1)
             lr_scheduler.step()
 
-        #prediction code
+        # prediction code
         # tweets_text = tweets_df['text'].to_list()
         # inputs = self.tokenizer(tweets_text, padding=True, truncation=True, return_tensors="pt").to(
         #     device)  # Move the tensor to the GPU
